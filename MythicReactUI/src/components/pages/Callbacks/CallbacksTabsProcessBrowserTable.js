@@ -9,8 +9,6 @@ import ListIcon from '@mui/icons-material/List';
 import { snackActions } from '../../utilities/Snackbar';
 import 'react-virtualized/styles.css';
 import MythicResizableGrid from '../../MythicComponents/MythicResizableGrid';
-import {TableFilterDialog} from './TableFilterDialog';
-import {MythicTransferListDialog} from '../../MythicComponents/MythicTransferList';
 import {TagsDisplay, ViewEditTags} from '../../MythicComponents/MythicTag';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
@@ -22,7 +20,12 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import {Dropdown, DropdownMenuItem, DropdownNestedMenuItem} from "../../MythicComponents/MythicNestedMenus";
 import {faSkullCrossbones, faSyringe, faKey,} from '@fortawesome/free-solid-svg-icons';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {GetComputedFontSize} from "../../MythicComponents/MythicSavedUserSetting";
+import {
+    GetComputedFontSize,
+    GetMythicSetting,
+    useSetMythicSetting
+} from "../../MythicComponents/MythicSavedUserSetting";
+import {CallbacksTableColumnsReorderDialog} from "./CallbacksTableColumnsReorderDialog";
 
 const getPermissionsDataQuery = gql`
     query getPermissionsQuery($mythictree_id: Int!) {
@@ -40,24 +43,40 @@ const updateFileComment = gql`
         }
     }
 `;
-
+const columnDefaults = [
+    { name: 'Info', width: 50, disableAutosize: true, disableSort: true, disableFilterMenu: true, key: "info", visible: true },
+    { name: 'PID', type: 'number', key: 'process_id', inMetadata: true, width: 100, visible: true},
+    { name: 'PPID', type: 'number', key: 'parent_process_id', inMetadata: true, width: 100, visible: true},
+    { name: 'Name', type: 'string', disableSort: false, key: 'name_text', fillWidth: true, visible: true },
+    { name: "Arch", type: 'string', key: 'architecture', inMetadata: true, width: 70, visible: true},
+    { name: "Integrity", type: "number", key: "integrity_level", inMetadata: true, width: 100, visible: false },
+    { name: 'Session', type: 'number', key: 'session_id', inMetadata: true, width: 100, visible: true},
+    { name: "User", type: 'string', key: 'user', inMetadata: true, fillWidth: true, visible: true},
+    { name: 'Tags', type: 'tags', disableSort: true, disableFilterMenu: true, width: 220, key: "tags", visible: false },
+    { name: 'Comment', type: 'string', key: 'comment', disableSort: false, width: 200, visible: false },
+    { name: "CMD", type: "string", key: 'command_line', inMetadata: true, fillWidth: true, visible: true},
+];
+const defaultVisibleColumns = ["Info","PID", "PPID", "Name",  "Arch", "Session", "User", "CMD"];
 export const CallbacksTabsProcessBrowserTable = ({treeAdjMatrix, treeRootData, me, onRowDoubleClick,
                                                      onTaskRowAction, host, group, showDeletedFiles, tabInfo,
                                                      expandOrCollapseAll, getLoadedCommandForUIFeature}) => {
     //const [allData, setAllData] = React.useState([]);
     //console.log("treeAdjMatrix updated in table", treeAdjMatrix)
+    const [updateSetting] = useSetMythicSetting();
+    const [loading, setLoading] = React.useState(true);
     const [sortData, setSortData] = React.useState({"sortKey": null, "sortDirection": null, "sortType": null});
     const [openNodes, setOpenNodes] = React.useState({});
     const [openContextMenu, setOpenContextMenu] = React.useState(false);
     const [filterOptions, setFilterOptions] = React.useState({});
     const selectedColumn = React.useRef({});
     const [columnVisibility, setColumnVisibility] = React.useState({
-        "visible": ["Info","PID", "PPID", "Name",  "Arch", "Session", "User", "CMD"],
+        "visible": defaultVisibleColumns,
         "hidden": [ "Comment", "Tags" ]
     })
     const [singleTreeData, setSingleTreeData] = React.useState({});
     const [viewSingleTreeData, setViewSingleTreeData] = React.useState(false);
-    const [openAdjustColumnsDialog, setOpenAdjustColumnsDialog] = React.useState(false);
+    const [openReorderDialog, setOpenReorderDialog] = React.useState(false);
+    const [columnOrder, setColumnOrder] = React.useState(columnDefaults);
     const [updatedTreeAdjMatrix, setUpdatedTreeAdjMatrix] = React.useState(treeAdjMatrix);
     const openAllNodes = (state) => {
         let onodes = {};
@@ -192,21 +211,10 @@ export const CallbacksTabsProcessBrowserTable = ({treeAdjMatrix, treeRootData, m
        // }
         
     };
-    const columnDefaults = [
-        { name: 'Info', width: 50, disableAutosize: true, disableSort: true, disableFilterMenu: true },
-        { name: 'PID', type: 'number', key: 'process_id', inMetadata: true, width: 100},
-        { name: 'PPID', type: 'number', key: 'parent_process_id', inMetadata: true, width: 100},
-        { name: 'Name', type: 'string', disableSort: false, key: 'name_text', fillWidth: true },
-        { name: "Arch", type: 'string', key: 'architecture', inMetadata: true, width: 70},
-        { name: 'Session', type: 'number', key: 'session_id', inMetadata: true, width: 100},
-        { name: "User", type: 'string', key: 'user', inMetadata: true, fillWidth: true},
-        { name: 'Tags', type: 'tags', disableSort: true, disableFilterMenu: true, width: 220 },
-        { name: 'Comment', type: 'string', key: 'comment', disableSort: false, width: 200 },
-        { name: "CMD", type: "string", key: 'command_line', inMetadata: true, fillWidth: true},
-    ];
+
     const columns = React.useMemo(
-        () => 
-            columnDefaults.reduce( (prev, cur) => {
+        () =>
+            columnOrder.reduce( (prev, cur) => {
                 if(columnVisibility.visible.includes(cur.name)){
                     if(filterOptions[cur.key] && String(filterOptions[cur.key]).length > 0){
                         return [...prev, {...cur, filtered: true}];
@@ -217,7 +225,7 @@ export const CallbacksTabsProcessBrowserTable = ({treeAdjMatrix, treeRootData, m
                     return [...prev];
                 }
             }, [])
-        , [filterOptions, columnVisibility]
+        , [filterOptions, columnVisibility, columnOrder]
     );
     const flattenNode = useCallback(
         (node, host, group, depth = 0) => {
@@ -386,6 +394,11 @@ export const CallbacksTabsProcessBrowserTable = ({treeAdjMatrix, treeRootData, m
     }, [allData, sortData]);
     const onSubmitFilterOptions = (value) => {
         setFilterOptions({...filterOptions, [selectedColumn.current.key]: value });
+        try{
+            updateSetting({setting_name: `process_browser_filter_options`, value: {...filterOptions,[selectedColumn.current.key]: value }});
+        }catch(error){
+            console.log("failed to save filter options");
+        }
         if(viewSingleTreeData){
             return
         }
@@ -550,6 +563,13 @@ export const CallbacksTabsProcessBrowserTable = ({treeAdjMatrix, treeRootData, m
                                             group={group}
                                             rowData={row} 
                                             cellData={treeRootData[group][host][row.full_path_text]?.parent_path_text || ""} />;
+                            case "Integrity":
+                                return <FileBrowserTableRowStringCell
+                                    treeRootData={treeRootData[group]}
+                                    host={host}
+                                    group={group}
+                                    rowData={row}
+                                    cellData={treeRootData[group][host][row.full_path_text ]?.metadata?.integrity_level || ''} />;
                             case "Tags":
                                 return <FileBrowserTagsCell 
                                             rowData={row} 
@@ -574,7 +594,7 @@ export const CallbacksTabsProcessBrowserTable = ({treeAdjMatrix, treeRootData, m
                                     cellData={treeRootData[group][host][row.full_path_text ]?.metadata?.command_line || ""}
                                 />;
                             default:
-                                console.log("hit default case in switch on c.name)")
+                                console.log("hit default case in switch on c.name)", c.name)
                         }
                     })];
                 }
@@ -620,7 +640,7 @@ export const CallbacksTabsProcessBrowserTable = ({treeAdjMatrix, treeRootData, m
             }
         },
         {
-            name: "Show/Hide Columns", type: "item", icon: null,
+            name: "Reorder Columns and Adjust Visibility", type: "item", icon: null,
             click: ({event, columnIndex}) => {
                 if(event){
                     event.stopPropagation();
@@ -630,12 +650,77 @@ export const CallbacksTabsProcessBrowserTable = ({treeAdjMatrix, treeRootData, m
                     snackActions.warning("Can't filter that column");
                     return;
                 }
-                setOpenAdjustColumnsDialog(true);
+                setOpenReorderDialog(true);
             }
         }
     ];
-    const onSubmitAdjustColumns = ({left, right}) => {
-        setColumnVisibility({visible: right, hidden: left});
+    React.useEffect( () => {
+        try {
+            const storageItem = GetMythicSetting({setting_name: `process_browser_table_columns`, default_value: defaultVisibleColumns});
+            if(storageItem !== null){
+                let allColumns = [...columnVisibility["visible"].map(c => c), ...columnVisibility["hidden"].map(c => c)];
+                let newHidden = [];
+                allColumns.forEach((v,i,a) => {
+                    if(!storageItem.includes(v)){
+                        newHidden.push(v);
+                    }
+                });
+                if(storageItem.length !== 0){
+                    setColumnVisibility({visible: storageItem, hidden: newHidden});
+                }
+            }
+        }catch(error){
+            console.log("Failed to load custom browser_table_columns", error);
+        }
+        try {
+            const storageItemOptions = GetMythicSetting({setting_name: `process_browser_filter_options`, default_value: {}});
+            if(storageItemOptions !== null){
+                setFilterOptions(storageItemOptions);
+            }
+        }catch(error){
+            console.log("Failed to load custom browser_table_filter_options", error);
+        }
+        try {
+            const storageColumnOrder = GetMythicSetting({setting_name: `process_browser_column_order`, default_value: columns.map(c => c.name)});
+            if(storageColumnOrder !== null){
+                let newOrder = [];
+                for(let i = 0; i < storageColumnOrder.length; i++){
+                    for(let j = 0; j < columnOrder.length; j++){
+                        if(columnOrder[j].name === storageColumnOrder[i]){
+                            newOrder.push(columnOrder[j]);
+                            break;
+                        }
+                    }
+                }
+                setColumnOrder(newOrder);
+            }
+        }catch(error){
+            console.log("Failed to load process_browser_table_filter_options", error);
+        }
+        setLoading(false);
+    }, []);
+    const onSubmitColumnReorder = (newOrder) => {
+        let newVisible = [];
+        let newHidden = [];
+        for(let i = 0; i < newOrder.length; i++){
+            if(newOrder[i].visible){
+                newVisible.push(newOrder[i].name);
+            } else {
+                newHidden.push(newOrder[i].name);
+            }
+        }
+        if(newVisible.length === 0){
+            snackActions.error("Can't update to show no fields");
+            return;
+        }
+        updateSetting({setting_name: `process_browser_column_order`, value: newOrder.map(c => c.name)});
+        setColumnOrder(newOrder);
+        setColumnVisibility({visible: newVisible, hidden: newHidden});
+        updateSetting({setting_name: `process_browser_table_columns`, value: newVisible});
+        setOpenReorderDialog(false);
+    }
+    const onResetColumnReorder = () => {
+        onSubmitColumnReorder(columnDefaults);
     }
     const sortColumn = columns.findIndex((column) => column.key === sortData.sortKey);
     React.useEffect( () => {
@@ -648,6 +733,21 @@ export const CallbacksTabsProcessBrowserTable = ({treeAdjMatrix, treeRootData, m
             openAllNodes(false);
         }
     }, [expandOrCollapseAll, updatedTreeAdjMatrix]);
+    if(loading){
+        return (
+            <div style={{width: '100%', height: '100%', position: "relative",}}>
+                <div style={{overflowY: "hidden", flexGrow: 1}}>
+                    <div style={{
+                        position: "absolute",
+                        left: "35%",
+                        top: "40%"
+                    }}>
+                        {"Loading Saved Browser Customizations..."}
+                    </div>
+                </div>
+            </div>
+        )
+    }
     return (
         <div style={{ width: '100%', height: '100%', overflow: "hidden", position: "relative" }}>
             <MythicResizableGrid
@@ -675,15 +775,20 @@ export const CallbacksTabsProcessBrowserTable = ({treeAdjMatrix, treeRootData, m
                               }
                 />
             }
-            {openAdjustColumnsDialog &&
-                <MythicDialog fullWidth={true} maxWidth="md" open={openAdjustColumnsDialog} 
-                  onClose={()=>{setOpenAdjustColumnsDialog(false);}} 
-                  innerDialog={
-                    <MythicTransferListDialog onClose={()=>{setOpenAdjustColumnsDialog(false);}} 
-                      onSubmit={onSubmitAdjustColumns} right={columnVisibility.visible} rightTitle="Show these columns"
-                      leftTitle={"Hidden Columns"} left={columnVisibility.hidden} dialogTitle={"Edit which columns are shown"}/>}
+            {openReorderDialog &&
+                <MythicDialog fullWidth={true} maxWidth="sm" open={openReorderDialog}
+                              onClose={()=>{setOpenReorderDialog(false);}}
+                              innerDialog={
+                                  <CallbacksTableColumnsReorderDialog
+                                      onClose={()=>{setOpenReorderDialog(false);}}
+                                      visible={columnVisibility.visible}
+                                      hidden={columnVisibility.hidden}
+                                      onReset={onResetColumnReorder}
+                                      onSubmit={onSubmitColumnReorder}
+                                      initialItems={columnOrder}
+                                  />}
                 />
-            }       
+            }
         </div>
     )
 }

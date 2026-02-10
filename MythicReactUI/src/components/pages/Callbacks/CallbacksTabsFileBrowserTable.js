@@ -26,8 +26,6 @@ import FileCopyOutlinedIcon from '@mui/icons-material/FileCopyOutlined';
 import { copyStringToClipboard } from '../../utilities/Clipboard';
 import MythicResizableGrid from '../../MythicComponents/MythicResizableGrid';
 import { MythicStyledTooltip } from '../../MythicComponents/MythicStyledTooltip';
-import {TableFilterDialog} from './TableFilterDialog';
-import {MythicTransferListDialog} from '../../MythicComponents/MythicTransferList';
 import {TagsDisplay, ViewEditTags} from '../../MythicComponents/MythicTag';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { toLocalTime } from '../../utilities/Time';
@@ -37,7 +35,12 @@ import {PreviewFileMediaDialog} from "../Search/PreviewFileMedia";
 import RefreshIcon from '@mui/icons-material/Refresh';
 import {Dropdown, DropdownMenuItem, DropdownNestedMenuItem} from "../../MythicComponents/MythicNestedMenus";
 import {RenderSingleTask} from "../SingleTaskView/SingleTaskView";
-import {GetComputedFontSize} from "../../MythicComponents/MythicSavedUserSetting";
+import {
+    GetComputedFontSize,
+    GetMythicSetting,
+    useSetMythicSetting
+} from "../../MythicComponents/MythicSavedUserSetting";
+import {CallbacksTableColumnsReorderDialog} from "./CallbacksTableColumnsReorderDialog";
 
 const getFileDownloadHistory = gql`
     query getFileDownloadHistory($full_path_text: String!, $host: String!, $group: [String!]) {
@@ -76,28 +79,33 @@ const updateFileComment = gql`
     }
 `;
 
+const defaultVisibleColumns = ["Info", "Name", "Size", "Last Modify"];
+const columnDefaults = [
+    { name: 'Info', width: 65, disableDoubleClick: true, disableSort: true, disableFilterMenu: true, key: "info", visible: true },
+    { name: 'Name', type: 'string', key: 'name_text', fillWidth: true, visible: true },
+    { name: "Size", type: "size", key: "size", inMetadata: true, width: 100, visible: true},
+    { name: "Last Modify", type: "date", key: "modify_time", inMetadata: true, width: 250, visible: true},
+    { name: 'Tags', type: 'tags', disableSort: true, disableFilterMenu: true, width: 220, key: "tags", visible: false },
+    { name: 'Comment', type: 'string', key: 'comment', width: 200, visible: false },
+];
 export const CallbacksTabsFileBrowserTable = (props) => {
+    const [updateSetting] = useSetMythicSetting();
+    const [loading, setLoading] = React.useState(true);
     const [allData, setAllData] = React.useState([]);
     const [openContextMenu, setOpenContextMenu] = React.useState(false);
     const [filterOptions, setFilterOptions] = React.useState({});
     const [selectedColumn, setSelectedColumn] = React.useState({});
     const [sortData, setSortData] = React.useState({"sortKey": null, "sortDirection": null, "sortType": null})
     const [columnVisibility, setColumnVisibility] = React.useState({
-        "visible": ["Info", "Name", "Size", "Last Modify"],
+        "visible": defaultVisibleColumns,
         "hidden": ["Tags", "Comment"]
     });
-    const [openAdjustColumnsDialog, setOpenAdjustColumnsDialog] = React.useState(false);
+    const [openReorderDialog, setOpenReorderDialog] = React.useState(false);
+    const [columnOrder, setColumnOrder] = React.useState(columnDefaults);
     const [selectedRows, setSelectedRows] = React.useState([]);
     const columns = React.useMemo(
         () =>
-            [
-                { name: 'Info', width: 65, disableDoubleClick: true, disableSort: true, disableFilterMenu: true },
-                { name: 'Name', type: 'string', key: 'name_text', fillWidth: true },
-                { name: "Size", type: "size", key: "size", inMetadata: true, width: 100},
-                { name: "Last Modify", type: "date", key: "modify_time", inMetadata: true, width: 250},
-                { name: 'Tags', type: 'tags', disableSort: true, disableFilterMenu: true, width: 220 },
-                { name: 'Comment', type: 'string', key: 'comment', width: 200 },
-            ].reduce( (prev, cur) => {
+            columnOrder.reduce( (prev, cur) => {
                 if(columnVisibility.visible.includes(cur.name)){
                     if(filterOptions[cur.key] && String(filterOptions[cur.key]).length > 0){
                         return [...prev, {...cur, filtered: true}];
@@ -108,7 +116,7 @@ export const CallbacksTabsFileBrowserTable = (props) => {
                     return [...prev];
                 }
             }, [])
-        , [filterOptions, columnVisibility]
+        , [filterOptions, columnVisibility, columnOrder]
     );
     const sortedData = React.useMemo(() => {
         if (sortData.sortKey === null || sortData.sortType === null) {
@@ -190,6 +198,11 @@ export const CallbacksTabsFileBrowserTable = (props) => {
     }, [allData, sortData]);
     const onSubmitFilterOptions = (value) => {
         setFilterOptions({...filterOptions, [selectedColumn.key]: value });
+        try{
+            updateSetting({setting_name: `file_browser_filter_options`, value: {...filterOptions,[selectedColumn.key]: value }});
+        }catch(error){
+            console.log("failed to save filter options");
+        }
     }
     const filterRow = (row) => {
         if(props.treeRootData[props.selectedFolderData.group] === undefined ||
@@ -324,18 +337,84 @@ export const CallbacksTabsFileBrowserTable = (props) => {
             }
         },
         {
-            name: "Show/Hide Columns",type: "item", icon: null,
+            name: "Reorder Columns and Adjust Visibility",type: "item", icon: null,
             click: ({event, columnIndex}) => {
                 if(event){
                     event.stopPropagation();
                     event.preventDefault();
                 }
-                setOpenAdjustColumnsDialog(true);
+                setOpenReorderDialog(true);
             }
         }
     ];
-    const onSubmitAdjustColumns = ({left, right}) => {
-        setColumnVisibility({visible: right, hidden: left});
+    React.useEffect( () => {
+        try {
+            const storageItem = GetMythicSetting({setting_name: `file_browser_table_columns`, default_value: defaultVisibleColumns});
+            if(storageItem !== null){
+                let allColumns = [...columnVisibility["visible"].map(c => c), ...columnVisibility["hidden"].map(c => c)];
+                let newHidden = [];
+                allColumns.forEach((v,i,a) => {
+                    if(!storageItem.includes(v)){
+                        newHidden.push(v);
+                    }
+                });
+                if(storageItem.length !== 0){
+                    setColumnVisibility({visible: storageItem, hidden: newHidden});
+                }
+            }
+        }catch(error){
+            console.log("Failed to load custom browser_table_columns", error);
+        }
+        try {
+            const storageItemOptions = GetMythicSetting({setting_name: `file_browser_filter_options`, default_value: {}});
+            if(storageItemOptions !== null){
+                setFilterOptions(storageItemOptions);
+            }
+        }catch(error){
+            console.log("Failed to load custom browser_table_filter_options", error);
+        }
+        try {
+            const storageColumnOrder = GetMythicSetting({setting_name: `file_browser_column_order`, default_value: columns.map(c => c.name)});
+            if(storageColumnOrder !== null){
+                let newOrder = [];
+                for(let i = 0; i < storageColumnOrder.length; i++){
+                    for(let j = 0; j < columnOrder.length; j++){
+                        if(columnOrder[j].name === storageColumnOrder[i]){
+                            newOrder.push(columnOrder[j]);
+                            break;
+                        }
+                    }
+                }
+                setColumnOrder(newOrder);
+            }
+        }catch(error){
+            console.log("Failed to load file_browser_table_filter_options", error);
+        }
+        setLoading(false);
+    }, []);
+    const onSubmitColumnReorder = (newOrder) => {
+        let newVisible = [];
+        let newHidden = [];
+        for(let i = 0; i < newOrder.length; i++){
+            if(newOrder[i].visible){
+                newVisible.push(newOrder[i].name);
+            } else {
+                newHidden.push(newOrder[i].name);
+            }
+        }
+        if(newVisible.length === 0){
+            snackActions.error("Can't update to show no fields");
+            return;
+        }
+        console.log("newOrder", newOrder)
+        updateSetting({setting_name: `file_browser_column_order`, value: newOrder.map(c => c.name)});
+        setColumnOrder(newOrder);
+        setColumnVisibility({visible: newVisible, hidden: newHidden});
+        updateSetting({setting_name: `file_browser_table_columns`, value: newVisible});
+        setOpenReorderDialog(false);
+    }
+    const onResetColumnReorder = () => {
+        onSubmitColumnReorder(columnDefaults);
     }
     const sortColumn = columns.findIndex((column) => column.key === sortData.sortKey);
     const onRowClick = ({event, rowDataStatic}) => {
@@ -556,6 +635,21 @@ export const CallbacksTabsFileBrowserTable = (props) => {
         }
         return options;
     }
+    if(loading){
+        return (
+            <div style={{width: '100%', height: '100%', position: "relative",}}>
+                <div style={{overflowY: "hidden", flexGrow: 1}}>
+                    <div style={{
+                        position: "absolute",
+                        left: "35%",
+                        top: "40%"
+                    }}>
+                        {"Loading Saved Browser Customizations..."}
+                    </div>
+                </div>
+            </div>
+        )
+    }
     return (
         <div style={{width: '100%', height: '100%', overflow: "hidden", position: "relative"}}>
             {displayFormat === "normal" &&
@@ -650,15 +744,20 @@ export const CallbacksTabsFileBrowserTable = (props) => {
                               }
                 />
             }
-            {openAdjustColumnsDialog &&
-                <MythicDialog fullWidth={true} maxWidth="md" open={openAdjustColumnsDialog} 
-                  onClose={()=>{setOpenAdjustColumnsDialog(false);}} 
-                  innerDialog={
-                    <MythicTransferListDialog onClose={()=>{setOpenAdjustColumnsDialog(false);}} 
-                      onSubmit={onSubmitAdjustColumns} right={columnVisibility.visible} rightTitle="Show these columns"
-                      leftTitle={"Hidden Columns"} left={columnVisibility.hidden} dialogTitle={"Edit which columns are shown"}/>}
+            {openReorderDialog &&
+                <MythicDialog fullWidth={true} maxWidth="sm" open={openReorderDialog}
+                              onClose={()=>{setOpenReorderDialog(false);}}
+                              innerDialog={
+                                  <CallbacksTableColumnsReorderDialog
+                                      onClose={()=>{setOpenReorderDialog(false);}}
+                                      visible={columnVisibility.visible}
+                                      hidden={columnVisibility.hidden}
+                                      onReset={onResetColumnReorder}
+                                      onSubmit={onSubmitColumnReorder}
+                                      initialItems={columnOrder}
+                                  />}
                 />
-            } 
+            }
         </div>
     );
 };

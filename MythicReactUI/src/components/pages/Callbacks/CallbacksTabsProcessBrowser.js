@@ -6,8 +6,6 @@ import {useTheme} from '@mui/material/styles';
 import Grid from '@mui/material/Grid';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import IconButton from '@mui/material/IconButton';
-import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
-import VisibilityIcon from '@mui/icons-material/Visibility';
 import {CallbacksTabsProcessBrowserTable} from './CallbacksTabsProcessBrowserTable';
 import {MythicModifyStringDialog} from '../../MythicComponents/MythicDialog';
 import {TaskFromUIButton} from './TaskFromUIButton';

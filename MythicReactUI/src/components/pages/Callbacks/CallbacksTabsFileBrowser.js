@@ -47,6 +47,7 @@ const fileDataFragment = gql`
                 color
                 id
             }
+            id
         }
         host
         id
