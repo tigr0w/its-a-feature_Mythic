@@ -165,6 +165,7 @@ func (t *pushC2Server) StartPushC2Streaming(stream services.PushC2_StartPushC2St
 		}
 		logging.LogDebug("Got new push c2 agent", "agent id", callbackUUID)
 		failedReadFromAgent := make(chan bool)
+		var streamSendMu sync.Mutex
 		go func() {
 			// continue to read new messages from the agent, these should realistically only be
 			// responses and streamed data based on what we push to the agent, but doesn't matter
@@ -217,12 +218,14 @@ func (t *pushC2Server) StartPushC2Streaming(stream services.PushC2_StartPushC2St
 				}
 				if fromMythicResponse.Err != nil {
 					// mythic encountered an error with the first message from the agent, return error and wait for the next
+					streamSendMu.Lock()
 					err = stream.Send(&services.PushC2MessageFromMythic{
 						Success:    false,
 						Error:      fromMythicResponse.Err.Error(),
 						Message:    nil,
 						TrackingID: fromMythicResponse.TrackingID,
 					})
+					streamSendMu.Unlock()
 					if err != nil {
 						// we failed to send the message back to the agent, bail
 						// not tracking any full listening callback yet, so nothing to mark closed
@@ -232,12 +235,14 @@ func (t *pushC2Server) StartPushC2Streaming(stream services.PushC2_StartPushC2St
 					// successfully sent our error message, re-loop waiting for next message
 					continue
 				}
+				streamSendMu.Lock()
 				err = stream.Send(&services.PushC2MessageFromMythic{
 					Success:    true,
 					Error:      "",
 					Message:    fromMythicResponse.Message,
 					TrackingID: fromMythicResponse.TrackingID,
 				})
+				streamSendMu.Unlock()
 				if err != nil {
 					// we failed to send the message back to the agent, bail
 					// not tracking any full listening callback yet, so nothing to mark closed
@@ -271,7 +276,9 @@ func (t *pushC2Server) StartPushC2Streaming(stream services.PushC2_StartPushC2St
 				// msgToSend.Message should be in the form:
 				// UUID[encrypted bytes or unencrypted data]
 				//logging.LogDebug("sending message from Mythic to agent")
+				streamSendMu.Lock()
 				err = stream.Send(&msgToSend)
+				streamSendMu.Unlock()
 				if err != nil {
 					logging.LogError(err, "Failed to send message through stream to push c2")
 					t.SetPushC2ChannelExited(callback.ID)
