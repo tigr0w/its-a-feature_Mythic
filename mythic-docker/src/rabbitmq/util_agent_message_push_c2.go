@@ -85,9 +85,9 @@ func sendMessageToDirectPushC2(callbackID int, message map[string]interface{}, u
 		// everything went ok, return from this
 		//logging.LogDebug("Sent message back to responseChan")
 		return nil
-	case <-time.After(grpc.PushC2Server.GetChannelTimeout()):
-		logging.LogError(nil, "timeout trying to send to responseChannel")
-		return errors.New("timeout trying to send to responseChannel")
+	default:
+		logging.LogError(nil, "push channel full, dropping proxy message", "callbackID", callbackID)
+		return errors.New("push channel full, dropping proxy message")
 	}
 
 }

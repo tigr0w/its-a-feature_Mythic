@@ -203,7 +203,7 @@ func (t *pushC2Server) addNewPushC2Client(CallbackID int, callbackUUID string, b
 	t.Lock()
 	if _, ok := t.clients[CallbackID]; !ok {
 		t.clients[CallbackID] = &grpcPushC2ClientConnections{}
-		t.clients[CallbackID].pushC2MessageFromMythic = make(chan services.PushC2MessageFromMythic, 100)
+		t.clients[CallbackID].pushC2MessageFromMythic = make(chan services.PushC2MessageFromMythic, 1000)
 	}
 	fromMythic := t.clients[CallbackID].pushC2MessageFromMythic
 	t.clients[CallbackID].connected = true
@@ -219,7 +219,7 @@ func (t *pushC2Server) addNewPushC2OneToManyClient(c2ProfileName string) (chan s
 	t.Lock()
 	if _, ok := t.clientsOneToMany[c2ProfileName]; !ok {
 		t.clientsOneToMany[c2ProfileName] = &grpcPushC2ClientConnections{}
-		t.clientsOneToMany[c2ProfileName].pushC2MessageFromMythic = make(chan services.PushC2MessageFromMythic, 100)
+		t.clientsOneToMany[c2ProfileName].pushC2MessageFromMythic = make(chan services.PushC2MessageFromMythic, 1000)
 	}
 	fromMythic := t.clientsOneToMany[c2ProfileName].pushC2MessageFromMythic
 	t.clientsOneToMany[c2ProfileName].connected = true
