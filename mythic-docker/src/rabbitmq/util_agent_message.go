@@ -308,6 +308,7 @@ func processAgentMessageContent(agentMessageInput *AgentMessageRawInput, uuidInf
 		instanceResponse.Err = errors.New(errorMessage)
 		return response
 	}
+	//logging.LogDebug("Parsing message from agent", "step 3", decryptedMessage)
 	if utils.MythicConfig.DebugAgentMessage {
 		stringMsg, err := json.Marshal(decryptedMessage)
 		if err != nil {
@@ -546,6 +547,7 @@ func processAgentMessageContent(agentMessageInput *AgentMessageRawInput, uuidInf
 	if uuidInfo.UUIDType == "callback" {
 		instanceResponse.OuterUuidIsCallback = true
 	}
+	//logging.LogDebug("message mythic back to agent", "response", response)
 	if utils.MythicConfig.DebugAgentMessage {
 		stringMsg, err := json.Marshal(response)
 		if err != nil {
@@ -721,7 +723,7 @@ func ProcessAgentMessage(agentMessageInput *AgentMessageRawInput) ([]byte, error
 }
 
 func LookupEncryptionData(c2profile string, messageUUID string, updateCheckinTime bool) (*cachedUUIDInfo, error) {
-	//logging.LogTrace("Looking up information for new message", "uuid", messageUUID)
+	//logging.LogDebug("Looking up encryption information for message", "uuid", messageUUID, "updateCheckinTime", updateCheckinTime, "c2profile", c2profile)
 	//logging.LogDebug("Getting encryption data", "cachemap", cachedUUIDInfoMap)
 	newCache := cachedUUIDInfo{}
 
@@ -1144,69 +1146,74 @@ func RecursivelyEncryptMessage(path []cbGraphAdjMatrixEntry, message map[string]
 	//logging.LogDebug("recursively encrypting message", "path", path)
 	for i := 0; i < len(path)-1; i++ {
 		logging.LogDebug("Recursively encrypting and prepping tasks for delegates", "target_id", path[i].DestinationId, "c2", path[i].C2ProfileName)
-		if targetUuidInfo, err := LookupEncryptionData(path[i].C2ProfileName, path[i].DestinationAgentId, true); err != nil {
+		targetUuidInfo, err := LookupEncryptionData(path[i].C2ProfileName, path[i].DestinationAgentId, updateCheckinTime)
+		if err != nil {
 			logging.LogError(err, "Failed to lookup encryption data for target", "target", path[i].DestinationAgentId, "target_id", path[i].DestinationId)
 			return nil, err
-		} else if encryptedBytes, err := EncryptMessage(targetUuidInfo, path[i].DestinationAgentId, currentMessage, true); err != nil {
+		}
+		encryptedBytes, err := EncryptMessage(targetUuidInfo, path[i].DestinationAgentId, currentMessage, true)
+		if err != nil {
 			logging.LogError(err, "Failed to encrypt message when trying to prep tasks for delegates")
 			return nil, err
-		} else {
-			currentMessage = map[string]interface{}{
-				"action": "get_tasking",
-				"tasks":  []string{},
-				"delegates": []map[string]interface{}{
-					{
-						"message":    string(encryptedBytes),
-						"c2_profile": path[i].C2ProfileName,
-						"uuid":       path[i].DestinationAgentId,
-					},
+		}
+		currentMessage = map[string]interface{}{
+			"action": "get_tasking",
+			"tasks":  []string{},
+			"delegates": []map[string]interface{}{
+				{
+					"message":    string(encryptedBytes),
+					"c2_profile": path[i].C2ProfileName,
+					"uuid":       path[i].DestinationAgentId,
 				},
-			}
+			},
 		}
 	}
 	// final encrypt of the message
 	i := len(path) - 1
 	if i >= 0 {
-		if targetUuidInfo, err := LookupEncryptionData(path[i].C2ProfileName, path[i].DestinationAgentId, updateCheckinTime); err != nil {
+		targetUuidInfo, err := LookupEncryptionData(path[i].C2ProfileName, path[i].DestinationAgentId, updateCheckinTime)
+		if err != nil {
 			logging.LogError(err, "Failed to lookup encryption data for target", "target", path[i].DestinationAgentId, "target_id", path[i].DestinationId)
 			return nil, err
-		} else if encryptedBytes, err := EncryptMessage(targetUuidInfo, path[i].DestinationAgentId, currentMessage, true); err != nil {
+		}
+		encryptedBytes, err := EncryptMessage(targetUuidInfo, path[i].DestinationAgentId, currentMessage, true)
+		if err != nil {
 			logging.LogError(err, "Failed to encrypt message when trying to prep tasks for delegates")
 			return nil, err
-		} else {
-			return encryptedBytes, nil
 		}
-	} else {
-		logging.LogError(nil, "Can't encrypt final time for delegate task wrapping", "index", i)
-		return nil, errors.New("failed to do final encrypt")
+		return encryptedBytes, nil
 	}
+	logging.LogError(nil, "Can't encrypt final time for delegate task wrapping", "index", i)
+	return nil, errors.New("failed to do final encrypt")
 }
 
 func reflectBackOtherKeys(response *map[string]interface{}, other *map[string]interface{}) {
 	reservedOtherKeys := map[string]int{
-		"socks":           1,
-		"edges":           1,
-		"delegates":       1,
-		"responses":       1,
-		"action":          1,
-		"rpfwd":           1,
-		"alerts":          1,
-		"ips":             1,
-		"os":              1,
-		"user":            1,
-		"architecture":    1,
-		"domain":          1,
-		"external_ip":     1,
-		"ip":              1,
-		"host":            1,
-		"pid":             1,
-		"process_name":    1,
-		"extra_info":      1,
-		"sleep_info":      1,
-		"integrity_level": 1,
-		"uuid":            1,
-		"interactive":     1,
-		"file_id":         1,
+		"socks":                 1,
+		"edges":                 1,
+		"delegates":             1,
+		"responses":             1,
+		"action":                1,
+		"rpfwd":                 1,
+		"alerts":                1,
+		"ips":                   1,
+		"os":                    1,
+		"user":                  1,
+		"architecture":          1,
+		"domain":                1,
+		"external_ip":           1,
+		"ip":                    1,
+		"host":                  1,
+		"pid":                   1,
+		"process_name":          1,
+		"extra_info":            1,
+		"sleep_info":            1,
+		"integrity_level":       1,
+		"uuid":                  1,
+		"interactive":           1,
+		"file_id":               1,
+		"cwd":                   1,
+		"impersonation_context": 1,
 	}
 	//logging.LogInfo("other keys", "other", *other)
 	for key, val := range *other {
@@ -1243,7 +1250,8 @@ func updateCheckinTimeEverySecond() {
 					callbackGraph.Add(callbackStruct, callbackStruct, callbackInfo.C2ProfileName, false)
 					i++
 				}
-				updateTimes(time.Now().UTC(), callbackIDs)
+				//logging.LogInfo("updating checkin times", "callbacks", callbackIDs)
+				//updateTimes(time.Now().UTC(), callbackIDs)
 				callbackIDMap = make(map[int]*cachedUUIDInfo)
 			}
 		}
@@ -1265,17 +1273,6 @@ func UpdateCallbackEdgesAndCheckinTime(uuidInfo *cachedUUIDInfo) {
 	// only bother updating the last checkin time if it's been more than one second
 	if callback.LastCheckin.Sub(uuidInfo.LastCheckinTime).Seconds() > 1 {
 		updateCheckinTimeChannel <- uuidInfo
-		/*
-			_, err := database.DB.NamedExec(`UPDATE callback SET
-				last_checkin=:last_checkin, dead=false
-				WHERE id=:id`, callback)
-			if err != nil {
-				logging.LogError(err, "Failed to update last_checkin time", "callback", uuidInfo.UUID)
-				return
-			}
-			callbackGraph.Add(callback, callback, uuidInfo.C2ProfileName, false)
-
-		*/
 		//callbackGraph.AddByAgentIds(callback.AgentCallbackID, callback.AgentCallbackID, uuidInfo.C2ProfileName)
 		if uuidInfo.EdgeId == 0 {
 			err := database.DB.Get(&uuidInfo.EdgeId, `SELECT id FROM callbackgraphedge

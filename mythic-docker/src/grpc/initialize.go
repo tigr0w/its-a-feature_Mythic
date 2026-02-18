@@ -3,20 +3,21 @@ package grpc
 import (
 	"errors"
 	"fmt"
+	"math"
+	"net"
+	"sync"
+	"time"
+
 	"github.com/its-a-feature/Mythic/database/enums/PushC2Connections"
 	"github.com/its-a-feature/Mythic/grpc/services"
 	"github.com/its-a-feature/Mythic/logging"
 	"github.com/its-a-feature/Mythic/utils"
 	"google.golang.org/grpc"
-	"math"
-	"net"
-	"sync"
-	"time"
 )
 
 const (
 	connectionTimeoutSeconds  = 10
-	channelSendTimeoutSeconds = 10
+	channelSendTimeoutSeconds = 1
 )
 
 type translationContainerServer struct {
@@ -203,7 +204,7 @@ func (t *pushC2Server) addNewPushC2Client(CallbackID int, callbackUUID string, b
 	t.Lock()
 	if _, ok := t.clients[CallbackID]; !ok {
 		t.clients[CallbackID] = &grpcPushC2ClientConnections{}
-		t.clients[CallbackID].pushC2MessageFromMythic = make(chan services.PushC2MessageFromMythic, 1000)
+		t.clients[CallbackID].pushC2MessageFromMythic = make(chan services.PushC2MessageFromMythic, 2000)
 	}
 	fromMythic := t.clients[CallbackID].pushC2MessageFromMythic
 	t.clients[CallbackID].connected = true
@@ -356,7 +357,7 @@ func Initialize(connectNotification chan int, disconnectNotification chan int) {
 	// initial for push c2 servers
 	PushC2Server.clients = make(map[int]*grpcPushC2ClientConnections)
 	PushC2Server.clientsOneToMany = make(map[string]*grpcPushC2ClientConnections)
-	PushC2Server.rabbitmqProcessPushC2AgentConnection = make(chan PushC2ServerConnected, 20)
+	PushC2Server.rabbitmqProcessPushC2AgentConnection = make(chan PushC2ServerConnected, 200)
 	PushC2Server.connectionTimeout = connectionTimeoutSeconds * time.Second
 	PushC2Server.channelSendTimeout = channelSendTimeoutSeconds * time.Second
 	connectString = fmt.Sprintf("0.0.0.0:%d", utils.MythicConfig.ServerGRPCPort)

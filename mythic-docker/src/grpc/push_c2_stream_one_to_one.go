@@ -14,13 +14,14 @@ import (
 )
 
 type RabbitMQProcessAgentMessageFromPushC2 struct {
-	C2Profile         string
-	RawMessage        *[]byte
-	Base64Message     *[]byte
-	RemoteIP          string
-	UpdateCheckinTime bool
-	ResponseChannel   chan RabbitMQProcessAgentMessageFromPushC2Response
-	TrackingID        string
+	C2Profile              string
+	RawMessage             *[]byte
+	Base64Message          *[]byte
+	RemoteIP               string
+	UpdateCheckinTime      bool
+	ResponseChannel        chan RabbitMQProcessAgentMessageFromPushC2Response
+	DefaultResponseChannel chan services.PushC2MessageFromMythic
+	TrackingID             string
 }
 type RabbitMQProcessAgentMessageFromPushC2Response struct {
 	Message             []byte
@@ -36,8 +37,8 @@ func (t *pushC2Server) StartPushC2Streaming(stream services.PushC2_StartPushC2St
 	var c2ProfileName string
 	var rawMessage *[]byte
 	var base64Message *[]byte
-	rabbitmqProcessAgentMessageResponseChannel := make(chan RabbitMQProcessAgentMessageFromPushC2Response, 2)
-	rabbitmqProcessAgentMessageToMythicChannel := make(chan RabbitMQProcessAgentMessageFromPushC2, 1)
+	rabbitmqProcessAgentMessageResponseChannel := make(chan RabbitMQProcessAgentMessageFromPushC2Response, 100)
+	rabbitmqProcessAgentMessageToMythicChannel := make(chan RabbitMQProcessAgentMessageFromPushC2, 10)
 	disconnectChannel := make(chan bool)
 	newPushConnectionChannel := t.GetRabbitMqProcessAgentMessageChannel()
 	// make channel with 2 in case something happens and disconnects the client before mythic responds
@@ -164,8 +165,7 @@ func (t *pushC2Server) StartPushC2Streaming(stream services.PushC2_StartPushC2St
 			return err
 		}
 		logging.LogDebug("Got new push c2 agent", "agent id", callbackUUID)
-		failedReadFromAgent := make(chan bool)
-		var streamSendMu sync.Mutex
+		failedReadFromAgent := make(chan bool, 4)
 		go func() {
 			// continue to read new messages from the agent, these should realistically only be
 			// responses and streamed data based on what we push to the agent, but doesn't matter
@@ -192,60 +192,20 @@ func (t *pushC2Server) StartPushC2Streaming(stream services.PushC2_StartPushC2St
 					base64Message = nil
 				}
 				// send the agent message along to Mythic for processing and catch response
+				//logging.LogDebug("got message from agent to Mythic")
 				select {
 				case rabbitmqProcessAgentMessageToMythicChannel <- RabbitMQProcessAgentMessageFromPushC2{
-					C2Profile:       c2ProfileName,
-					ResponseChannel: rabbitmqProcessAgentMessageResponseChannel,
-					RawMessage:      rawMessage,
-					Base64Message:   base64Message,
-					RemoteIP:        fromAgent.GetRemoteIP(),
-					TrackingID:      fromAgent.TrackingID,
+					C2Profile: c2ProfileName,
+					//ResponseChannel: rabbitmqProcessAgentMessageResponseChannel,
+					DefaultResponseChannel: newPushMessageFromMythicChannel,
+					RawMessage:             rawMessage,
+					Base64Message:          base64Message,
+					RemoteIP:               fromAgent.GetRemoteIP(),
+					TrackingID:             fromAgent.TrackingID,
 				}:
-				case <-time.After(t.GetChannelTimeout()):
+				case <-failedReadFromAgent:
 					err = errors.New("timeout sending to rabbitmqProcessAgentMessageChannel")
 					logging.LogError(err, "gRPC stream connection needs to exit due to timeouts")
-					failedReadFromAgent <- true
-					return
-				}
-				var fromMythicResponse RabbitMQProcessAgentMessageFromPushC2Response
-				select {
-				case fromMythicResponse = <-rabbitmqProcessAgentMessageResponseChannel:
-				case <-time.After(t.GetChannelTimeout()):
-					err = errors.New("timeout receiving msg from mythic to channel")
-					logging.LogError(err, "gRPC stream connection needs to exit due to timeouts")
-					failedReadFromAgent <- true
-					return
-				}
-				if fromMythicResponse.Err != nil {
-					// mythic encountered an error with the first message from the agent, return error and wait for the next
-					streamSendMu.Lock()
-					err = stream.Send(&services.PushC2MessageFromMythic{
-						Success:    false,
-						Error:      fromMythicResponse.Err.Error(),
-						Message:    nil,
-						TrackingID: fromMythicResponse.TrackingID,
-					})
-					streamSendMu.Unlock()
-					if err != nil {
-						// we failed to send the message back to the agent, bail
-						// not tracking any full listening callback yet, so nothing to mark closed
-						failedReadFromAgent <- true
-						return
-					}
-					// successfully sent our error message, re-loop waiting for next message
-					continue
-				}
-				streamSendMu.Lock()
-				err = stream.Send(&services.PushC2MessageFromMythic{
-					Success:    true,
-					Error:      "",
-					Message:    fromMythicResponse.Message,
-					TrackingID: fromMythicResponse.TrackingID,
-				})
-				streamSendMu.Unlock()
-				if err != nil {
-					// we failed to send the message back to the agent, bail
-					// not tracking any full listening callback yet, so nothing to mark closed
 					failedReadFromAgent <- true
 					return
 				}
@@ -266,6 +226,46 @@ func (t *pushC2Server) StartPushC2Streaming(stream services.PushC2_StartPushC2St
 				t.SetPushC2ChannelExited(callback.ID)
 				//go updatePushC2LastCheckinDisconnectTimestamp(callback.ID, c2ProfileName)
 				return errors.New(fmt.Sprintf("client disconnected: %s", callbackUUID))
+			case fromMythicResponse, ok := <-rabbitmqProcessAgentMessageResponseChannel:
+				if !ok {
+					logging.LogError(nil, "got !ok from fromMythicResponse, channel was closed for push c2")
+					t.SetPushC2ChannelExited(callback.ID)
+					//go updatePushC2LastCheckinDisconnectTimestamp(callback.ID, c2ProfileName)
+					return nil
+				}
+				if fromMythicResponse.Err != nil {
+					// mythic encountered an error with the first message from the agent, return error and wait for the next
+					err = stream.Send(&services.PushC2MessageFromMythic{
+						Success:    false,
+						Error:      fromMythicResponse.Err.Error(),
+						Message:    nil,
+						TrackingID: fromMythicResponse.TrackingID,
+					})
+					if err != nil {
+						logging.LogError(err, "Failed to send message through stream to push c2")
+						// we failed to send the message back to the agent, bail
+						// not tracking any full listening callback yet, so nothing to mark closed
+						failedReadFromAgent <- true
+						t.SetPushC2ChannelExited(callback.ID)
+						return err
+					}
+					// successfully sent our error message, re-loop waiting for next message
+					continue
+				}
+				err = stream.Send(&services.PushC2MessageFromMythic{
+					Success:    true,
+					Error:      "",
+					Message:    fromMythicResponse.Message,
+					TrackingID: fromMythicResponse.TrackingID,
+				})
+				if err != nil {
+					logging.LogError(err, "Failed to send message through stream to push c2")
+					// we failed to send the message back to the agent, bail
+					// not tracking any full listening callback yet, so nothing to mark closed
+					failedReadFromAgent <- true
+					t.SetPushC2ChannelExited(callback.ID)
+					return err
+				}
 			case msgToSend, ok := <-newPushMessageFromMythicChannel:
 				if !ok {
 					logging.LogError(nil, "got !ok from messageToSend, channel was closed for push c2")
@@ -276,9 +276,7 @@ func (t *pushC2Server) StartPushC2Streaming(stream services.PushC2_StartPushC2St
 				// msgToSend.Message should be in the form:
 				// UUID[encrypted bytes or unencrypted data]
 				//logging.LogDebug("sending message from Mythic to agent")
-				streamSendMu.Lock()
 				err = stream.Send(&msgToSend)
-				streamSendMu.Unlock()
 				if err != nil {
 					logging.LogError(err, "Failed to send message through stream to push c2")
 					t.SetPushC2ChannelExited(callback.ID)
@@ -286,6 +284,7 @@ func (t *pushC2Server) StartPushC2Streaming(stream services.PushC2_StartPushC2St
 					return err
 				}
 			}
+			logging.LogInfo("sent data to agent", "newPushMessageFromMythicChannel", len(newPushMessageFromMythicChannel))
 		}
 	}
 }
@@ -294,6 +293,7 @@ var c2ProfileMap = make(map[string]int)
 var c2ProfileMapPushC2MapLock sync.RWMutex
 
 func updatePushC2LastCheckinDisconnectTimestamp(callbackId int, c2ProfileName string) {
+	logging.LogInfo("pushc2 disconnected")
 	c2ProfileId := -1
 	c2ProfileMapPushC2MapLock.Lock()
 	if _, ok := c2ProfileMap[c2ProfileName]; ok {
@@ -344,7 +344,7 @@ func updatePushC2LastCheckinConnectTimestamp(callbackId int, c2ProfileName strin
 	err := database.DB.Get(&currentEdge, `SELECT id FROM callbackgraphedge WHERE
 		 source_id=$1 and destination_id=$2 and c2_profile_id=$3 and end_timestamp IS NULL`,
 		callbackId, callbackId, c2ProfileId)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		// no active edges, so add one
 		_, err = database.DB.Exec(`INSERT INTO callbackgraphedge
 						(source_id, destination_id, c2_profile_id, operation_id)
@@ -355,6 +355,8 @@ func updatePushC2LastCheckinConnectTimestamp(callbackId int, c2ProfileName strin
 		} else {
 			logging.LogInfo("Added new callbackgraph edge in pushC2", "c2", c2ProfileId, "callback", callbackId)
 		}
+	} else if err != nil {
+		logging.LogError(err, "failed to get callbackgraph edges")
 	}
 	select {
 	case pushC2StreamingConnectNotification <- callbackId:

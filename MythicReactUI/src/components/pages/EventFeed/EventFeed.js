@@ -93,6 +93,9 @@ mutation UpdateLevelOperationEventLog($id: Int!) {
     }
   }
    `;
+export const levelOptions = [
+  "All Levels", "warning (unresolved)", "warning (resolved)", "info", "debug", "api", "auth", "agent"
+];
 export function EventFeed({}){
   const [pageData, setPageData] = React.useState({
     "totalCount": 0,
@@ -112,7 +115,30 @@ export function EventFeed({}){
           updatingPrev[indx] = cur;
           return [...updatingPrev];
         }
-        return [...prev, cur];
+        // only add this if this msg fits into the right current view
+        switch(level){
+          case "All Levels":
+            return [...prev, cur];
+          case "warning (unresolved)":
+            if( (cur.warning || cur.level === 'warning') && cur.resolved === false){
+              return [...prev, cur]
+            } else {
+              return [...prev];
+            }
+          case "warning (resolved)":
+            if( (cur.warning || cur.level === 'warning') && cur.resolved === true){
+              return [...prev, cur];
+            } else {
+              return [...prev];
+            }
+          default:
+            if(cur.level === level && !cur.warning){
+              return [...prev, cur];
+            } else {
+              return [...prev];
+            }
+        }
+        //return [...prev, cur];
       }, [...operationeventlog]);
       newEvents.sort((a,b) => (a.id > b.id) ? -1 : ((b.id > a.id) ? 1 : 0));
       setOperationEventLog(newEvents);

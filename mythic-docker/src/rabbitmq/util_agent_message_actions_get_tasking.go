@@ -119,7 +119,7 @@ func getDelegateTaskMessages(callbackID int, agentUUIDLength int, updateCheckinT
 	if callbackIds := submittedTasksAwaitingFetching.getOtherCallbackIds(callbackID); len(callbackIds) > 0 {
 		// check if there's a route between our callback and the callback with a task
 		for _, targetCallbackId := range callbackIds {
-			if routablePath := callbackGraph.GetBFSPath(callbackID, targetCallbackId); routablePath != nil {
+			if routablePath := callbackGraph.GetBFSPath(callbackID, targetCallbackId); routablePath != nil && len(routablePath) > 0 {
 				// there's a route between our callback and the target callback for some sort of task
 				logging.LogDebug("task exists for callback we can route to")
 				currentTasks := []databaseStructs.Task{}
@@ -206,7 +206,7 @@ func getDelegateProxyMessages(callbackID int, agentUUIDLength int, updateCheckin
 	if callbackIds := proxyPorts.GetOtherCallbackIds(callbackID); len(callbackIds) > 0 {
 		// check if there's a route between our callback and the callback with a task
 		for _, targetCallbackId := range callbackIds {
-			if routablePath := callbackGraph.GetBFSPath(callbackID, targetCallbackId); routablePath != nil {
+			if routablePath := callbackGraph.GetBFSPath(callbackID, targetCallbackId); routablePath != nil && len(routablePath) > 0 {
 				// there's a route between our callback and the target callback for some sort of proxy data
 				if messages, err := proxyPorts.GetDataForCallbackId(targetCallbackId, CALLBACK_PORT_TYPE_SOCKS); err != nil {
 					logging.LogError(err, "Failed to get socks proxy data for routable callback")

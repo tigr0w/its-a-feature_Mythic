@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.24] - 2026-02-18
+
+### Changed
+
+- Updated PushC2 to funnel traffic into one channel instead of two
+- Updated socks proxy reads to do a basic burst for read sizes to reduce number of concurrent waiting messages
+  - this increases throughput for socks traffic with a bit more bursty memory usage
+- Updated key reflection in agent messages to omit cwd and impersonation_context fields
+- Updated empty BFS paths to be cached as well so non-existent paths aren't recomputed a bunch
+
 ## [3.4.23] - 2026-02-08
 
 ### Changed

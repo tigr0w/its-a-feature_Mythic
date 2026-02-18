@@ -91,11 +91,17 @@ func handleAgentMessageUpdateInfo(incoming *map[string]interface{}, uUIDInfo *ca
 		if agentMessage.Architecture != "" {
 			callback.Architecture = agentMessage.Architecture
 		}
+		if agentMessage.Cwd != nil {
+			callback.Cwd = *agentMessage.Cwd
+		}
+		if agentMessage.ImpersonationContext != nil {
+			callback.ImpersonationContext = *agentMessage.ImpersonationContext
+		}
 		if _, err := database.DB.NamedExec(`UPDATE callback SET 
             "user"=:user, host=:host, pid=:pid, extra_info=:extra_info, sleep_info=:sleep_info,
             enc_key=:enc_key, dec_key=:dec_key, process_name=:process_name, ip=:ip, external_ip=:external_ip,
             integrity_level=:integrity_level, "domain"=:domain, os=:os, architecture=:architecture,
-            process_short_name=:process_short_name
+            process_short_name=:process_short_name, cwd=:cwd, impersonation_context=:impersonation_context
 			 WHERE id=:id`, callback); err != nil {
 			response["status"] = "error"
 			response["error"] = err.Error()

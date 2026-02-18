@@ -37,7 +37,8 @@ func (t *pushC2Server) StartPushC2StreamingOneToMany(stream services.PushC2_Star
 		if err == io.EOF {
 			logging.LogDebug("Client closed before ever sending anything, err is EOF")
 			return nil // the client closed before ever sending anything
-		} else if err != nil {
+		}
+		if err != nil {
 			logging.LogError(err, "Client ran into an error before sending anything")
 			return err
 		}
@@ -55,6 +56,7 @@ func (t *pushC2Server) StartPushC2StreamingOneToMany(stream services.PushC2_Star
 		}
 		logging.LogDebug("Got new push c2 for one-to-many", "c2", c2ProfileName)
 		failedReadFromAgent := make(chan bool)
+		var streamSendMu sync.Mutex
 		go func() {
 			// continue to read new messages from the agent, these should realistically only be
 			// responses and streamed data based on what we push to the agent, but doesn't matter
@@ -64,7 +66,8 @@ func (t *pushC2Server) StartPushC2StreamingOneToMany(stream services.PushC2_Star
 					logging.LogDebug("Client closed before ever sending anything, err is EOF")
 					failedReadFromAgent <- true // the client closed before ever sending anything
 					return
-				} else if err != nil {
+				}
+				if err != nil {
 					logging.LogError(err, "Client ran into an error before sending anything")
 					failedReadFromAgent <- true
 					return
@@ -111,12 +114,14 @@ func (t *pushC2Server) StartPushC2StreamingOneToMany(stream services.PushC2_Star
 				go updatePushC2OneToManyLastCheckinConnectTimestamp(fromMythicResponse, len(fromAgent.Base64Message) > 0, c2ProfileName)
 				if fromMythicResponse.Err != nil {
 					// mythic encountered an error with the first message from the agent, return error and wait for the next
+					streamSendMu.Lock()
 					err = stream.Send(&services.PushC2MessageFromMythic{
 						Success:    false,
 						Error:      fromMythicResponse.Err.Error(),
 						Message:    nil,
 						TrackingID: fromMythicResponse.TrackingID,
 					})
+					streamSendMu.Unlock()
 					if err != nil {
 						// we failed to send the message back to the agent, bail
 						// not tracking any full listening callback yet, so nothing to mark closed
@@ -126,12 +131,14 @@ func (t *pushC2Server) StartPushC2StreamingOneToMany(stream services.PushC2_Star
 					// successfully sent our error message, re-loop waiting for next message
 					continue
 				}
+				streamSendMu.Lock()
 				err = stream.Send(&services.PushC2MessageFromMythic{
 					Success:    true,
 					Error:      "",
 					Message:    fromMythicResponse.Message,
 					TrackingID: fromMythicResponse.TrackingID,
 				})
+				streamSendMu.Unlock()
 				if err != nil {
 					// we failed to send the message back to the agent, bail
 					// not tracking any full listening callback yet, so nothing to mark closed
@@ -165,7 +172,9 @@ func (t *pushC2Server) StartPushC2StreamingOneToMany(stream services.PushC2_Star
 				// msgToSend.Message should be in the form:
 				// UUID[encrypted bytes or unencrypted data]
 				//logging.LogDebug("sending message from Mythic to agent")
+				streamSendMu.Lock()
 				err = stream.Send(&msgToSend)
+				streamSendMu.Unlock()
 				if err != nil {
 					logging.LogError(err, "Failed to send message through stream to push c2")
 					t.SetPushC2OneToManyChannelExited(c2ProfileName)

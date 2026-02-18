@@ -14,6 +14,7 @@ import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import Grid from '@mui/material/Grid';
 import {alertCount} from "../../../cache";
+import {levelOptions} from "./EventFeed";
 
 const EventList = ({onUpdateLevel, onUpdateResolution, operationeventlog}) => {
    return (
@@ -31,9 +32,7 @@ export function EventFeedTable(props){
     const theme = useTheme();
     const [search, setSearch] = React.useState("");
     const [level, setLevel] = React.useState("info");
-    const levelOptions = [
-        "All Levels", "warning (unresolved)", "warning (resolved)", "info", "debug", "api", "auth", "agent"
-    ];
+
 
     const handleSearchValueChange = (name, value, error) => {
         setSearch(value);

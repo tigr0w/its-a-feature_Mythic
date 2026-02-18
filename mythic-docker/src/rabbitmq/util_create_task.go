@@ -106,80 +106,63 @@ func (s *submittedTasksForAgents) addTask(task databaseStructs.Task) {
 		if err != nil {
 			logging.LogError(err, "failed to generate pushc2 task message")
 		}
-		err = sendMessageToDirectPushC2(task.CallbackID, newTaskMsg, false)
+		err = sendMessageToDirectPushC2(task.CallbackID, newTaskMsg)
 		if err != nil {
 			logging.LogError(err, "failed to send pushc2 task message")
-		} else {
-			_, err = database.DB.Exec(`UPDATE callback SET last_checkin=$1
-			WHERE id=$2`, time.UnixMicro(0), task.CallbackID)
-			if err != nil {
-				logging.LogError(err, "Failed to update callback last checkin time")
-			}
-			EventingChannel <- EventNotification{
-				Trigger:     eventing.TriggerTaskStart,
-				OperationID: task.OperationID,
-				OperatorID:  task.OperatorID,
-				TaskID:      task.ID,
-			}
-			return
 		}
-	} else {
-		// check if the task is for a linked agent of a push c2 style client
-		connectedPushClient := grpc.PushC2Server.GetConnectedClients()
-		for _, clientID := range connectedPushClient {
-			if routablePath := callbackGraph.GetBFSPath(clientID, task.CallbackID); routablePath != nil {
-				// we have a p2p path from callbackID to task.CallbackID
-				delegateMessages := pushC2AgentGetDelegateTaskMessages(task.ID, task.CallbackID, routablePath)
-				if delegateMessages != nil {
-					newTaskMsg := map[string]interface{}{
-						"action":    "get_tasking",
-						"delegates": delegateMessages,
-					}
-					/*
-						err := sendMessageToDirectPushC2(clientID, newTaskMsg, false)
-						if err != nil {
-							logging.LogError(err, "failed to send pushc2 delegate task message")
-						} else {
-							return
-						}
-
-					*/
-
-					responseChan, callbackUUID, base64Encoded, c2ProfileName, trackingID, _, err := grpc.PushC2Server.GetPushC2ClientInfo(clientID)
-					logging.LogDebug("new msg for push c2", "task", newTaskMsg)
-					uUIDInfo, err := LookupEncryptionData(c2ProfileName, callbackUUID, false)
-					if err != nil {
-						logging.LogError(err, "Failed to find encryption data for callback")
-						break
-					}
-					responseBytes, err := EncryptMessage(uUIDInfo, callbackUUID, newTaskMsg, base64Encoded)
-					if err != nil {
-						logging.LogError(err, "Failed to encrypt message")
-						break
-					}
-					//logging.LogDebug("new encrypted msg for push c2", "enc", string(responseBytes))
-					select {
-					case responseChan <- services.PushC2MessageFromMythic{
-						Message:    responseBytes,
-						Success:    true,
-						Error:      "",
-						TrackingID: trackingID,
-					}:
-						// everything went ok, return from this
-						logging.LogDebug("Sent message back to responseChan")
-
-					case <-time.After(grpc.PushC2Server.GetChannelTimeout()):
-						logging.LogError(nil, "timeout trying to send to responseChannel")
-
-					}
-					EventingChannel <- EventNotification{
-						Trigger:     eventing.TriggerTaskStart,
-						OperationID: task.OperationID,
-						OperatorID:  task.OperatorID,
-						TaskID:      task.ID,
-					}
-					return
+		EventingChannel <- EventNotification{
+			Trigger:     eventing.TriggerTaskStart,
+			OperationID: task.OperationID,
+			OperatorID:  task.OperatorID,
+			TaskID:      task.ID,
+		}
+		return
+	}
+	// check if the task is for a linked agent of a push c2 style client
+	connectedPushClient := grpc.PushC2Server.GetConnectedClients()
+	for _, clientID := range connectedPushClient {
+		if routablePath := callbackGraph.GetBFSPath(clientID, task.CallbackID); routablePath != nil && len(routablePath) > 0 {
+			// we have a p2p path from callbackID to task.CallbackID
+			delegateMessages := pushC2AgentGetDelegateTaskMessages(task.ID, task.CallbackID, routablePath)
+			if delegateMessages != nil {
+				newTaskMsg := map[string]interface{}{
+					"action":    "get_tasking",
+					"delegates": delegateMessages,
 				}
+				responseChan, callbackUUID, base64Encoded, c2ProfileName, trackingID, _, err := grpc.PushC2Server.GetPushC2ClientInfo(clientID)
+				//logging.LogDebug("new msg for push c2", "task", newTaskMsg)
+				uUIDInfo, err := LookupEncryptionData(c2ProfileName, callbackUUID, false)
+				if err != nil {
+					logging.LogError(err, "Failed to find encryption data for callback")
+					break
+				}
+				responseBytes, err := EncryptMessage(uUIDInfo, callbackUUID, newTaskMsg, base64Encoded)
+				if err != nil {
+					logging.LogError(err, "Failed to encrypt message")
+					break
+				}
+				//logging.LogDebug("new encrypted msg for push c2", "enc", string(responseBytes))
+				select {
+				case responseChan <- services.PushC2MessageFromMythic{
+					Message:    responseBytes,
+					Success:    true,
+					Error:      "",
+					TrackingID: trackingID,
+				}:
+					// everything went ok, return from this
+					logging.LogDebug("Sent message to PushC2 Channel")
+
+				case <-time.After(grpc.PushC2Server.GetChannelTimeout()):
+					logging.LogError(nil, "timeout trying to send to responseChannel")
+
+				}
+				EventingChannel <- EventNotification{
+					Trigger:     eventing.TriggerTaskStart,
+					OperationID: task.OperationID,
+					OperatorID:  task.OperatorID,
+					TaskID:      task.ID,
+				}
+				return
 			}
 		}
 	}

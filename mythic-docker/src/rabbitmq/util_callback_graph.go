@@ -60,7 +60,7 @@ func (c *bfsCache) GetPath(sourceId int, destinationId int) []cbGraphAdjMatrixEn
 	if _, sourceExists := c.cache[sourceId]; sourceExists {
 		if _, destinationExists := c.cache[sourceId][destinationId]; destinationExists {
 			if len(c.cache[sourceId][destinationId]) > 0 {
-				logging.LogInfo("Got path from cache", "source", sourceId, "destination", destinationId, "path", c.cache[sourceId][destinationId][0])
+				//logging.LogInfo("Got path from cache", "source", sourceId, "destination", destinationId, "path", c.cache[sourceId][destinationId][0])
 				return c.cache[sourceId][destinationId][0]
 			}
 			return nil
@@ -113,7 +113,7 @@ func (g *cbGraph) getAllChildIDs(callbackId int) []int {
 			continue
 		}
 		for i, _ := range immediateChildren {
-			if immediateChildren[i].SourceId == immediateChildren[i].DestinationId {
+			if immediateChildren[i].SourceId == immediateChildren[i].DestinationId && immediateChildren[i].SourceId != callbackId {
 				//logging.LogInfo("found egress connection", "id", immediateChildren[i])
 				callbacksWithEgress = append(callbacksWithEgress, immediateChildren[i].SourceId)
 			}
@@ -143,7 +143,7 @@ func (g *cbGraph) getAllChildIDs(callbackId int) []int {
 	finalCallbackIDsToUpdate := []int{}
 	for _, callbackIdToUpdate := range callbackIDsToUpdate {
 		//logging.LogInfo("checking if should update", "callbackIdToUpdate", callbackIdToUpdate)
-		if slices.Contains(callbacksWithEgress, callbackIdToUpdate) {
+		if slices.Contains(callbacksWithEgress, callbackIdToUpdate) || slices.Contains(finalCallbackIDsToUpdate, callbackIdToUpdate) {
 			//logging.LogInfo("checking if should update", "its egress", true, "callbackIdToUpdate", callbackIdToUpdate)
 			continue
 		}
@@ -236,7 +236,7 @@ func (g *cbGraph) Add(source databaseStructs.Callback, destination databaseStruc
 		if dest.DestinationId == destination.ID && dest.C2ProfileName == c2profileName {
 			g.lock.Unlock()
 			//logging.LogDebug("Found existing connection, not adding new one to memory", "source", source.ID, "destination", destination.ID, "c2 profile", c2profileName)
-			if initializing {
+			if initializing || c2.IsP2p {
 				// don't update callback times when initializing, this is when the Mythic server starts up
 				return
 			}
@@ -246,6 +246,7 @@ func (g *cbGraph) Add(source databaseStructs.Callback, destination databaseStruc
 			}
 			callbackIDs := g.getAllChildIDs(source.ID)
 			if len(callbackIDs) > 0 {
+				//logging.LogInfo("about to call updateTimes in Add", "callbackIDs", callbackIDs, "c2", c2profileName, "source", source.ID, "destination", destination.ID)
 				updateTimes(updateTime, callbackIDs)
 			}
 			return
@@ -418,7 +419,9 @@ func (g *cbGraph) GetBFSPath(sourceId int, destinationId int) []cbGraphAdjMatrix
 			}
 		}
 	}
-	return nil
+	// add a known "empty" so we don't keep looking
+	BFSCache.Add(sourceId, destinationId, []cbGraphAdjMatrixEntry{})
+	return []cbGraphAdjMatrixEntry{}
 }
 func (g *cbGraph) Print() {
 	g.lock.RLock()
@@ -431,6 +434,7 @@ func (g *cbGraph) Print() {
 }
 
 func RemoveEdgeByIds(sourceId int, destinationId int, c2profileName string) error {
+	//logging.LogInfo("removing edges", "sourceID", sourceId, "destinationID", destinationId, "c2ProfileName", c2profileName)
 	currentEdges := []databaseStructs.Callbackgraphedge{}
 	err := database.DB.Select(&currentEdges, `SELECT
 		id FROM callbackgraphedge WHERE 
@@ -510,7 +514,7 @@ func getC2ProfileForName(c2profileName string) databaseStructs.C2profile {
 		return c2
 	}
 	c2profile := databaseStructs.C2profile{}
-	err := database.DB.Get(&c2profile, `SELECT id, is_p2p FROM c2profile WHERE "name"=$1 AND deleted=false`,
+	err := database.DB.Get(&c2profile, `SELECT id, is_p2p, "name" FROM c2profile WHERE "name"=$1 AND deleted=false`,
 		c2profileName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return databaseStructs.C2profile{}

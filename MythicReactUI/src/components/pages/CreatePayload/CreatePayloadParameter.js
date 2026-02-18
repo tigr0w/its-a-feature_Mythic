@@ -59,7 +59,7 @@ export function CreatePayloadParameter({onChange, parameter_type, default_value,
     const [dictSelectOptions, setDictSelectOptions] = React.useState([]);
     const [dictSelectOptionsChoice, setDictSelectOptionsChoice] = React.useState("");
     const [dateValue, setDateValue] = React.useState(dayjs(new Date()));
-    const [arrayValue, setArrayValue] = React.useState([""]);
+    const [arrayValue, setArrayValue] = React.useState([]);
     const [typedArrayValue, setTypedArrayValue] = React.useState([]);
     const [fileValue, setFileValue] = React.useState({name: ""});
     const [fileMultValue, setFileMultValue] = React.useState([]);

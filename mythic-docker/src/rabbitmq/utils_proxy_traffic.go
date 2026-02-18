@@ -1110,6 +1110,34 @@ var Socks5UnrecognizedAddrType = fmt.Errorf("unrecognized address type")
 var Socks5StartNoAuth = []byte{'\x05', '\x00'}
 var Socks5StartUsernamePasswordAuth = []byte{'\x05', '\x02'}
 
+// maxAllocSize is 100KB
+const maxAllocSize = 1024 * 100
+const minAllocSize = 1024
+
+func (p *callbackPortUsage) burstAdjustReadSize(lastReads []int, currentLimit int) int {
+	if lastReads[0] == 0 {
+		return currentLimit
+	}
+	if lastReads[0] == lastReads[1] && lastReads[1] == lastReads[2] && lastReads[0] == currentLimit {
+		newLimit := currentLimit * 2
+		if newLimit > maxAllocSize {
+			newLimit = maxAllocSize
+		}
+		return newLimit
+	}
+	if lastReads[0] == lastReads[1] && lastReads[1] > lastReads[2] {
+		return currentLimit
+	}
+	if lastReads[0] > lastReads[1] && lastReads[0] > lastReads[2] {
+		newLimit := currentLimit / 2
+		if newLimit < minAllocSize {
+			newLimit = minAllocSize
+		}
+		return newLimit
+	}
+	return currentLimit
+}
+
 // ***** start section from https://github.com/armon/go-socks5 ********
 type AddrSpec struct {
 	FQDN string
@@ -1310,11 +1338,19 @@ func (p *callbackPortUsage) handleSocksConnections() {
 			go func(conn net.Conn) {
 				// function for reading from Mythic's connections to send to agents
 				firstRead := true
+				lastReadSizes := []int{0, 0, 0}
+				tempBufSize := minAllocSize
 				for {
-					buf := make([]byte, 4096)
-					logging.LogDebug("looping to read from connection again", "server_id", newConnection.ServerID)
+					tempBufSize = p.burstAdjustReadSize(lastReadSizes, tempBufSize)
+					buf := make([]byte, tempBufSize)
+					//logging.LogDebug("looping to read from connection again", "server_id", newConnection.ServerID)
+					// add some sleep here to keep things from getting overwhelmed
+					time.Sleep(time.Duration(20) * time.Millisecond)
 					length, err := conn.Read(buf)
 					if length > 0 {
+						lastReadSizes[0] = lastReadSizes[1]
+						lastReadSizes[1] = lastReadSizes[2]
+						lastReadSizes[2] = length
 						if firstRead {
 							firstRead = false
 							// the first message that gets sent has connection information
@@ -1510,6 +1546,7 @@ func (p *callbackPortUsage) handleSocksConnections() {
 										}
 										// track it so we can get the output back to the right addr
 										p.newConnectionChannel <- &newUDPConnection
+										//logging.LogDebug("got new UDP connection, sending to intercept proxy")
 										interceptProxyToAgentMessageChan <- interceptProxyToAgentMessage{
 											Message: proxyToAgentMessage{
 												Message:  newUDPConnectionBuf[:newUDPConnectionBufLength],
@@ -1563,6 +1600,7 @@ func (p *callbackPortUsage) handleSocksConnections() {
 														p.removeConnectionsChannel <- &newUDPConnection
 														return
 													}
+													//logging.LogDebug("new udp message saying to remove")
 													interceptProxyToAgentMessageChan <- interceptProxyToAgentMessage{
 														Message: proxyToAgentMessage{
 															Message:  nil,
@@ -1583,7 +1621,7 @@ func (p *callbackPortUsage) handleSocksConnections() {
 							default:
 							}
 						}
-						//logging.LogDebug("Message received from proxychains", "serverID", newConnection.ServerID, "size", length)
+						//logging.LogDebug("Message received from proxychains", "serverID", newConnection.ServerID, "size", length, "sizeLimit", tempBufSize)
 						interceptProxyToAgentMessageChan <- interceptProxyToAgentMessage{
 							Message: proxyToAgentMessage{
 								Message:  buf[:length],

@@ -35,20 +35,40 @@ func processAgentMessageFromPushC2() {
 						TrackingID:        agentMessage.TrackingID,
 					})
 					//logging.LogDebug("finished processing message, about to send response back to grpc")
-					select {
-					case agentMessage.ResponseChannel <- grpc.RabbitMQProcessAgentMessageFromPushC2Response{
-						Message:             messageResponse.Message,
-						NewCallbackUUID:     messageResponse.NewCallbackUUID,
-						OuterUuid:           messageResponse.OuterUuid,
-						OuterUuidIsCallback: messageResponse.OuterUuidIsCallback,
-						Err:                 messageResponse.Err,
-						TrackingID:          messageResponse.TrackingID,
-						AgentUUIDSize:       messageResponse.AgentUUIDSize,
-					}:
-					case <-time.After(grpc.PushC2Server.GetChannelTimeout()):
-						err := errors.New("timeout sending agent message response back to agentMessageToProcess.ResponseChannel")
-						logging.LogError(err, "not sending response back")
+					if agentMessage.DefaultResponseChannel != nil {
+						//logging.LogDebug("got response message from Mythic back to Agent for PushC2 via agentMessage.DefaultResponseChannel")
+						select {
+						case agentMessage.DefaultResponseChannel <- services.PushC2MessageFromMythic{
+							Success:    true,
+							Error:      "",
+							Message:    messageResponse.Message,
+							TrackingID: messageResponse.TrackingID,
+						}:
+						case <-newConnection.DisconnectProcessingChan:
+							err := errors.New("client disconnected trying to send back to agentMessageToProcess.ResponseChannel")
+							logging.LogError(err, "not sending response back")
+							return
+						}
 					}
+					if agentMessage.ResponseChannel != nil {
+						//logging.LogDebug("Sending response back to ResponseChannel for PushC2")
+						select {
+						case agentMessage.ResponseChannel <- grpc.RabbitMQProcessAgentMessageFromPushC2Response{
+							Message:             messageResponse.Message,
+							NewCallbackUUID:     messageResponse.NewCallbackUUID,
+							OuterUuid:           messageResponse.OuterUuid,
+							OuterUuidIsCallback: messageResponse.OuterUuidIsCallback,
+							Err:                 messageResponse.Err,
+							TrackingID:          messageResponse.TrackingID,
+							AgentUUIDSize:       messageResponse.AgentUUIDSize,
+						}:
+						case <-newConnection.DisconnectProcessingChan:
+							err := errors.New("client disconnected trying to send back to agentMessageToProcess.ResponseChannel")
+							logging.LogError(err, "not sending response back")
+							return
+						}
+					}
+
 				case <-newConnection.DisconnectProcessingChan:
 					logging.LogInfo("PushC2 client disconnected, exiting routine processing messages")
 					return
@@ -58,13 +78,13 @@ func processAgentMessageFromPushC2() {
 		}(agentMessageToProcess)
 	}
 }
-func sendMessageToDirectPushC2(callbackID int, message map[string]interface{}, updateCheckinTime bool) error {
+func sendMessageToDirectPushC2(callbackID int, message map[string]interface{}) error {
 	responseChan, callbackUUID, base64Encoded, c2ProfileName, trackingID, _, err := grpc.PushC2Server.GetPushC2ClientInfo(callbackID)
 	if err != nil {
 		logging.LogError(err, "Failed to get push c2 client info")
 		return err
 	}
-	uUIDInfo, err := LookupEncryptionData(c2ProfileName, callbackUUID, updateCheckinTime)
+	uUIDInfo, err := LookupEncryptionData(c2ProfileName, callbackUUID, true)
 	if err != nil {
 		logging.LogError(err, "Failed to find encryption data for callback")
 		return err
@@ -86,8 +106,9 @@ func sendMessageToDirectPushC2(callbackID int, message map[string]interface{}, u
 		//logging.LogDebug("Sent message back to responseChan")
 		return nil
 	default:
-		logging.LogError(nil, "push channel full, dropping proxy message", "callbackID", callbackID)
-		return errors.New("push channel full, dropping proxy message")
+		err = errors.New("push channel full")
+		logging.LogError(err, "message dropped", "callbackID", callbackID)
+		return err
 	}
 
 }
@@ -120,20 +141,20 @@ func interceptProxyDataToAgentForPushC2() {
 				_ = sendMessageToDirectPushC2(msg.CallbackID, map[string]interface{}{
 					"action":      "post_response",
 					msg.ProxyType: []interface{}{msg.InteractiveMessage},
-				}, false)
+				})
 			case CALLBACK_PORT_TYPE_SOCKS:
 				fallthrough
 			case CALLBACK_PORT_TYPE_RPORTFWD:
 				_ = sendMessageToDirectPushC2(msg.CallbackID, map[string]interface{}{
 					"action":      "post_response",
 					msg.ProxyType: []interface{}{msg.Message},
-				}, false)
+				})
 			}
 			attemptedToSend = true
 		} else {
-			connectedPushClient := grpc.PushC2Server.GetConnectedClients()
-			for _, clientID := range connectedPushClient {
-				if routablePath := callbackGraph.GetBFSPath(clientID, msg.CallbackID); routablePath != nil {
+			connectedPushClients := grpc.PushC2Server.GetConnectedClients()
+			for _, clientID := range connectedPushClients {
+				if routablePath := callbackGraph.GetBFSPath(clientID, msg.CallbackID); routablePath != nil && len(routablePath) > 0 {
 					var delegateMessages interface{}
 					switch msg.ProxyType {
 					case CALLBACK_PORT_TYPE_INTERACTIVE:
@@ -149,7 +170,11 @@ func interceptProxyDataToAgentForPushC2() {
 							"action":    "post_response",
 							"delegates": delegateMessages,
 						}
-						_ = sendMessageToDirectPushC2(clientID, newTaskMsg, false)
+						//logging.LogDebug("about to call sendMessageToDirectPushC2")
+						err := sendMessageToDirectPushC2(clientID, newTaskMsg)
+						if err != nil {
+							logging.LogError(err, "failed to send to push c2 delegate messages")
+						}
 						attemptedToSend = true
 						break
 					}
@@ -384,7 +409,7 @@ func pushC2AgentGetDelegateTaskMessages(taskId int, callbackId int, routablePath
 			}
 		}
 
-		if wrappedMessage, err := RecursivelyEncryptMessage(routablePath, newTask, true); err != nil {
+		if wrappedMessage, err := RecursivelyEncryptMessage(routablePath, newTask, false); err != nil {
 			logging.LogError(err, "Failed to recursively encrypt message")
 		} else {
 			submittedTasksAwaitingFetching.removeTask(currentTasks[i].ID)
@@ -405,15 +430,15 @@ func pushC2AgentGetDelegateProxyMessages(messages []interface{}, portType string
 		"action": "get_tasking",
 		portType: messages,
 	}
-	if wrappedMessage, err := RecursivelyEncryptMessage(routablePath, newTask, true); err != nil {
+	wrappedMessage, err := RecursivelyEncryptMessage(routablePath, newTask, false)
+	if err != nil {
 		logging.LogError(err, "Failed to recursively encrypt message")
 		return nil
-	} else {
-		delegateMessages = append(delegateMessages, delegateMessageResponse{
-			Message:       string(wrappedMessage),
-			SuppliedUuid:  routablePath[len(routablePath)-1].DestinationAgentId,
-			C2ProfileName: routablePath[len(routablePath)-1].C2ProfileName,
-		})
 	}
+	delegateMessages = append(delegateMessages, delegateMessageResponse{
+		Message:       string(wrappedMessage),
+		SuppliedUuid:  routablePath[len(routablePath)-1].DestinationAgentId,
+		C2ProfileName: routablePath[len(routablePath)-1].C2ProfileName,
+	})
 	return delegateMessages
 }

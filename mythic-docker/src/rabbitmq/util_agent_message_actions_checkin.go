@@ -25,8 +25,8 @@ type agentMessageCheckin struct {
 	ProcessName          string                 `json:"process_name" mapstructure:"process_name"`
 	EncKey               *[]byte                `json:"enc_key" mapstructure:"enc_key"`
 	DecKey               *[]byte                `json:"dec_key" mapstructure:"dec_key"`
-	Cwd                  string                 `json:"cwd" mapstructure:"cwd"`
-	ImpersonationContext string                 `json:"impersonation_context" mapstructure:"impersonation_context"`
+	Cwd                  *string                `json:"cwd,omitempty" mapstructure:"cwd,omitempty"`
+	ImpersonationContext *string                `json:"impersonation_context,omitempty" mapstructure:"impersonation_context,omitempty"`
 	Other                map[string]interface{} `json:"-" mapstructure:",remain"` // capture any 'other' keys that were passed in so we can reply back with them
 }
 

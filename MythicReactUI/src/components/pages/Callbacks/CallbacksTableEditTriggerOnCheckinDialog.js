@@ -17,7 +17,11 @@ import MythicTextField from "../../MythicComponents/MythicTextField";
 export function CallbacksTableEditTriggerOnCheckinDialog(props) {
     const [comment, setComment] = React.useState(0);
     const onChange = (name, value, error) => {
-        setComment(parseInt(value));
+        if(isNaN(parseInt(value))){
+            setComment(0);
+        } else {
+            setComment(parseInt(value));
+        }
     }
     useEffect( () => {
         setComment(props.trigger_on_checkin_after_time);
@@ -29,8 +33,14 @@ export function CallbacksTableEditTriggerOnCheckinDialog(props) {
     <React.Fragment>
         <DialogTitle id="form-dialog-title">{"Adjust this callback's trigger threshold"}</DialogTitle>
         <DialogContent dividers={true} style={{height: "100%"}}>
-            <Typography>
-                {"This adjusts how long, in minutes, this callback must not checkin before finally checking in to trigger an eventing workflow (trigger is callback_checkin). A zero value means never trigger."}
+            <Typography >
+                This adjusts how long, in minutes, this callback must <b>not</b> checkin before finally checking in to trigger an <b>eventing workflow</b> (trigger is callback_checkin).
+            </Typography>
+            <Typography >
+                A zero value means never trigger.
+            </Typography>
+            <Typography >
+                If no eventing workflow for <b>callback_checkin</b> that matches the right payload_types and supported_os restrictions, then nothing will happen.
             </Typography>
             <MythicTextField autoFocus={true} onChange={onChange} type={"number"} value={comment} onEnter={onSubmit} name={"trigger threshold in minutes"} showLabel={false} />
         </DialogContent>
