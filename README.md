@@ -124,6 +124,7 @@ This Golang package is responsible for connecting to RabbitMQ, syncing your data
 ## Documentation
 
 All documentation for the Mythic project is being maintained on the [docs.mythic-c2.net](https://docs.mythic-c2.net) website.
+The backing code for the documentation is in the [Mintlify_Dcumentation](https://github.com/MythicMeta/Mintlify_Documentation) repository in MythicMeta.
 
 
 ## Contributions
