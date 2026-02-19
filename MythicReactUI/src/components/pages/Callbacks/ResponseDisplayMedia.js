@@ -831,52 +831,53 @@ const DisplayDatabase = ({agent_file_id, expand, fileMetaData}) => {
                     }}/>
                 <Button color={"success"} variant={"contained"} onClick={onSubmitQuery} >Query</Button>
             </div>
-                <TabContext style={{width: "100%", height: "100%", borderBottom: "1px solid grey"}} value={selectedTab}>
-                    <TabList onChange={onChangeTab} indicatorColor='secondary'
-                             textColor='primary'
-                             sx={{
-                                 '& .Mui-selected': {
-                                     color: "unset !important"
-                                 }
-                             }}>
-                        {results.map((result, index) => (
-                            <Tab key={result.query + index} style={{padding: 0, paddingLeft: "10px", paddingRight: "10px"}} label={
-                                <div style={{display: "inline-block"}}>
-                                    {result.name}
-                                    <IconButton style={{padding: 0, marginLeft: "5px", marginRight: "5px", marginBottom: "5px"}}
-                                                color={"error"}
-                                                onClick={(e) => removeQuery(e, index)}>
-                                        x
-                                    </IconButton>
-                                </div>} value={index} className={selectedTab === index ? "selectedCallback" : ""} />
-                        ))}
-                    </TabList>
-
+            <TabContext style={{width: "100%", height: "100%", borderBottom: "1px solid grey", overflow: "auto"}} value={selectedTab}>
+                <TabList onChange={onChangeTab} indicatorColor='secondary'
+                         textColor='primary'
+                         sx={{
+                             '& .Mui-selected': {
+                                 color: "unset !important"
+                             }
+                         }}>
                     {results.map((result, index) => (
-                        <>
-                            {result?.results?.values?.length >= MAX_ROWS &&
-                                <Paper key={"overflow" + index} style={{display: selectedTab === index ? "flex" : "none",
-                                    justifyContent: "center", hidden: selectedTab !== index}}>
-                                    <WarningOutlinedIcon color={"warning"}></WarningOutlinedIcon>
-                                    {"Output is truncated to first " + MAX_ROWS + " rows"}
-                                    <WarningOutlinedIcon color={"warning"}></WarningOutlinedIcon>
-                                </Paper>
-                            }
-                            <div key={"output" + index} style={{display: selectedTab === index ? "flex" : "none", alignItems: "center"}}>
-                                {"Save Output As: "}
-                                <Button variant={"outlined"} style={{marginLeft: "10px"}} onClick={() => onSaveOutputCSV(result)} >CSV</Button>
-                                <Button variant={"outlined"} style={{marginLeft: "10px"}} onClick={() => onSaveOutputPrettyPrint(result)} >Pretty Print</Button>
-                            </div>
-                            <TabPanel value={index} key={"tabpanel" + index}
-                                      style={{padding: 0, height: "100%", width: "100%", overflow: "auto", position: "relative",
-                                          display: selectedTab === index ? "flex" : "none",
-                                          flexDirection: "column"}} >
-
-                                <DisplayDatabaseResult result={result?.results} />
-                            </TabPanel>
-                        </>
+                        <Tab key={result.query + index} style={{padding: 0, paddingLeft: "10px", paddingRight: "10px"}} label={
+                            <div style={{display: "inline-block"}}>
+                                {result.name}
+                                <IconButton style={{padding: 0, marginLeft: "5px", marginRight: "5px", marginBottom: "5px"}}
+                                            color={"error"}
+                                            onClick={(e) => removeQuery(e, index)}>
+                                    x
+                                </IconButton>
+                            </div>} value={index} className={selectedTab === index ? "selectedCallback" : ""} />
                     ))}
-                </TabContext>
+                </TabList>
+
+                {results.map((result, index) => (
+                    <div key={index} style={{display: selectedTab === index ? "flex" : "none",
+                        width: "100%", height: "100%", overflow: "auto",
+                        flexDirection: "column"}}>
+                        {result?.results?.values?.length >= MAX_ROWS &&
+                            <Paper key={"overflow" + index} style={{display: selectedTab === index ? "flex" : "none",
+                                justifyContent: "center", hidden: selectedTab !== index}}>
+                                <WarningOutlinedIcon color={"warning"}></WarningOutlinedIcon>
+                                {"Output is truncated to first " + MAX_ROWS + " rows"}
+                                <WarningOutlinedIcon color={"warning"}></WarningOutlinedIcon>
+                            </Paper>
+                        }
+                        <div key={"output" + index} style={{display: selectedTab === index ? "flex" : "none", alignItems: "center", width: "100%"}}>
+                            {"Save Output As: "}
+                            <Button variant={"outlined"} style={{marginLeft: "10px"}} onClick={() => onSaveOutputCSV(result)} >CSV</Button>
+                            <Button variant={"outlined"} style={{marginLeft: "10px"}} onClick={() => onSaveOutputPrettyPrint(result)} >Pretty Print</Button>
+                        </div>
+                        <TabPanel value={index} key={"tabpanel" + index}
+                                  style={{padding: 0, height: "100%", width: "100%", overflow: "auto", position: "relative",
+                                      display: selectedTab === index ? "flex" : "none",
+                                      flexDirection: "column"}} >
+                                <DisplayDatabaseResult result={result?.results} />
+                        </TabPanel>
+                    </div>
+                ))}
+            </TabContext>
         </div>
     )
 }
@@ -884,29 +885,25 @@ const DisplayDatabaseResult = ({result}) => {
     const [columns, setColumns] = React.useState(result.columns);
     const [rows, setRows] = React.useState(result.values?.slice(0, MAX_ROWS));
     return (
-        <>
-
-            <Table style={{overflow: "auto"}}>
-                <TableHead >
-                    <TableRow>
-                        {columns.map((column, index) => (
-                            <TableCell key={"header" + index}>{column}</TableCell>
+        <Table stickyHeader style={{width: "100%", height: "100%", position: "absolute"}}>
+            <TableHead >
+                <TableRow>
+                    {columns.map((column, index) => (
+                        <TableCell key={"header" + index}>{column}</TableCell>
+                    ))}
+                </TableRow>
+            </TableHead>
+            <TableBody>
+                {rows.map((row, index1) => (
+                    <TableRow key={"row" + index1} hover>
+                        {columns.map((_, index2) => (
+                            <TableCell key={"row" + index1+ "cell" + index2}>
+                                {row[index2]}
+                            </TableCell>
                         ))}
                     </TableRow>
-                </TableHead>
-                <TableBody>
-                    {rows.map((row, index1) => (
-                        <TableRow key={"row" + index1} hover>
-                            {columns.map((_, index2) => (
-                                <TableCell key={"row" + index1+ "cell" + index2}>
-                                    {row[index2]}
-                                </TableCell>
-                            ))}
-                        </TableRow>
-                    ))}
-                </TableBody>
-            </Table>
-        </>
-
+                ))}
+            </TableBody>
+        </Table>
     )
 }
